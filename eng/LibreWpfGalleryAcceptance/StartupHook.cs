@@ -499,6 +499,9 @@ internal sealed class GalleryAcceptanceScenario
             var popupDelta = firstItemOwnerPoint - expectedOwnerPoint;
             GalleryAcceptanceLog.Write(
                 $"ComboBox expected popup at owner {expectedOwnerPoint}; first item reports owner {firstItemOwnerPoint}; delta=({firstItemOwnerPoint.X - expectedOwnerPoint.X:0.##},{firstItemOwnerPoint.Y - expectedOwnerPoint.Y:0.##}); window visual offset={windowVisualOffset}; popup target={popupTarget?.GetType().Name ?? "<null>"}; popup parent={popupParent?.GetType().Name ?? "<null>"} origin={popupParentOrigin} size={popupParent?.ActualWidth:0.##}x{popupParent?.ActualHeight:0.##}.");
+            Require(
+                Math.Abs(popupDelta.X) <= 24 && Math.Abs(popupDelta.Y) <= 24,
+                $"ComboBox popup first-frame placement drifted too far from its target by {popupDelta}.");
             if (Math.Abs(popupDelta.X) > 12 || Math.Abs(popupDelta.Y) > 12)
             {
                 Require(
