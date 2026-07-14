@@ -511,7 +511,10 @@ internal sealed class GalleryAcceptanceScenario
                 return;
             }
         }
-        AssertPopupRenderState("open ComboBox popup", minimumPopupCount: 1);
+        if (!AssertPopupRenderState("open ComboBox popup", minimumPopupCount: 1))
+        {
+            return;
+        }
         _openComboBox.IsDropDownOpen = false;
         ProGpuWpfDiagnostics.TryRequestRender(_window);
         SetState(ScenarioState.WaitingForComboBoxClose);
@@ -582,7 +585,10 @@ internal sealed class GalleryAcceptanceScenario
         }
 
         _contextMenu.UpdateLayout();
-        AssertPopupRenderState("open ContextMenu", minimumPopupCount: 1);
+        if (!AssertPopupRenderState("open ContextMenu", minimumPopupCount: 1))
+        {
+            return;
+        }
         var contextOrigin = _contextMenu.PointToScreen(new Point(0, 0));
         var ownerPoint = _window!.PointFromScreen(contextOrigin);
         Require(IsFinite(ownerPoint.X) && IsFinite(ownerPoint.Y),
@@ -621,7 +627,10 @@ internal sealed class GalleryAcceptanceScenario
             return;
         }
 
-        AssertPopupRenderState("owner-moved ContextMenu", minimumPopupCount: 1);
+        if (!AssertPopupRenderState("owner-moved ContextMenu", minimumPopupCount: 1))
+        {
+            return;
+        }
         GalleryAcceptanceLog.Write(
             $"ContextMenu followed its moved owner at screen ({contextOrigin.X:0.##},{contextOrigin.Y:0.##}), owner ({ownerPoint.X:0.##},{ownerPoint.Y:0.##}).");
         _nestedMenu.IsSubmenuOpen = true;
@@ -639,7 +648,10 @@ internal sealed class GalleryAcceptanceScenario
             return;
         }
 
-        AssertPopupRenderState("open nested ContextMenu submenu", minimumPopupCount: 2);
+        if (!AssertPopupRenderState("open nested ContextMenu submenu", minimumPopupCount: 2))
+        {
+            return;
+        }
         var commandScreenPoint = _nestedCommand.PointToScreen(
             new Point(_nestedCommand.ActualWidth * 0.5, _nestedCommand.ActualHeight * 0.5));
         _nestedCommandOwnerPoint = _window!.PointFromScreen(commandScreenPoint);
@@ -647,12 +659,17 @@ internal sealed class GalleryAcceptanceScenario
             $"Nested command translated to a non-finite owner point {_nestedCommandOwnerPoint}.");
 
         var owners = new object?[64];
-        Require(ProGpuWpfDiagnostics.TryHitTestOwners(
-                    _window,
-                    _nestedCommandOwnerPoint.X,
-                    _nestedCommandOwnerPoint.Y,
-                    owners,
-                    out var ownerCount) && ownerCount > 0,
+        Require(ProGpuWpfDiagnostics.TryGetPortablePopupSnapshot(_window, out var popupSnapshot),
+            "Nested command popup diagnostics are unavailable.");
+        bool queriedOwners = popupSnapshot.NativeWindowCount > 0
+            ? ProGpuWpfDiagnostics.TryQueryNativePopupOwners(_window, owners, out var ownerCount)
+            : ProGpuWpfDiagnostics.TryHitTestOwners(
+                _window,
+                _nestedCommandOwnerPoint.X,
+                _nestedCommandOwnerPoint.Y,
+                owners,
+                out ownerCount);
+        Require(queriedOwners && ownerCount > 0,
             $"Nested command GPU hit test returned no owners at {_nestedCommandOwnerPoint}.");
         var commandOwnerIndex = -1;
         for (var index = 0; index < ownerCount; index++)
@@ -735,12 +752,38 @@ internal sealed class GalleryAcceptanceScenario
         SetState(ScenarioState.Finishing);
     }
 
-    private void AssertPopupRenderState(string stage, int minimumPopupCount)
+    private bool AssertPopupRenderState(string stage, int minimumPopupCount)
     {
         AssertRenderState(stage);
-        Require(ProGpuWpfDiagnostics.TryGetCompositionLayerSnapshot(_window, out var layers) &&
-                layers.PopupLayerChildCount >= minimumPopupCount,
-            $"{stage}: expected at least {minimumPopupCount} rendered popup roots, found {layers.PopupLayerChildCount}.");
+        Require(ProGpuWpfDiagnostics.TryGetCompositionLayerSnapshot(_window, out var layers),
+            $"{stage}: composition-layer snapshot is unavailable.");
+        Require(ProGpuWpfDiagnostics.TryGetPortablePopupSnapshot(_window, out var popups),
+            $"{stage}: portable-popup snapshot is unavailable.");
+
+        bool nativeReady = popups.NativeWindowCount >= minimumPopupCount &&
+            popups.PresentedNativeWindowCount >= minimumPopupCount &&
+            popups.NativeWindowGpuHitTestCount >= minimumPopupCount &&
+            popups.NativeWindowGpuHitTestOwnerCount >= minimumPopupCount;
+        bool compositedReady = layers.PopupLayerChildCount >= minimumPopupCount;
+        if (!nativeReady && !compositedReady && _stateTicks < 12)
+        {
+            ProGpuWpfDiagnostics.TryRequestRender(_window);
+            return false;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            Require(nativeReady,
+                $"{stage}: expected at least {minimumPopupCount} presented native popup windows with GPU hit testing, found {popups}.");
+        }
+        else
+        {
+            Require(compositedReady,
+                $"{stage}: expected at least {minimumPopupCount} rendered popup roots, found {layers.PopupLayerChildCount}.");
+        }
+
+        GalleryAcceptanceLog.Write($"{stage}: popup snapshot {popups}; owner popup roots={layers.PopupLayerChildCount}.");
+        return true;
     }
 
     private void AssertRenderState(string stage)
