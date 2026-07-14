@@ -1,5 +1,27 @@
 # WPF Gallery
 
+> This branch builds WPFGallery with the `LibreWPF.Sdk` and runs the unchanged
+> Gallery source on the ProGPU backend.
+
+Build and run the Gallery from this directory:
+
+```bash
+dotnet restore WPFGallery.csproj
+dotnet run --project WPFGallery.csproj -c Release --no-restore
+```
+
+After a Release build, the nonshipping typed acceptance gate can exercise all
+52 pages, retained composition, GPU hit testing, input, and moved-window popup
+placement:
+
+```bash
+../../eng/LibreWpfGalleryAcceptance/run.sh
+```
+
+See
+[`eng/LibreWpfGalleryAcceptance/README.md`](../../eng/LibreWpfGalleryAcceptance/README.md)
+for its exact coverage and output controls.
+
 This application showcases the new Fluent theme styles being introduced in WPF in .NET 9 Preview 4.
 
 ![WPF Gallery Landing Page](Assets/README_Images/WPFGalleryLanding.png)

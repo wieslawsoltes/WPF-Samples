@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LibreWpfGalleryAcceptance</AssemblyName>
+    <RootNamespace>LibreWpfGalleryAcceptance</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GalleryOutput)' == ''">
+    <GalleryOutput>$(MSBuildThisFileDirectory)..\..\Sample Applications\WPFGallery\bin\Release\net10.0-windows</GalleryOutput>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="WindowsBase" HintPath="$(GalleryOutput)/WindowsBase.dll" Private="false" />
+    <Reference Include="PresentationCore" HintPath="$(GalleryOutput)/PresentationCore.dll" Private="false" />
+    <Reference Include="PresentationFramework" HintPath="$(GalleryOutput)/PresentationFramework.dll" Private="false" />
+    <Reference Include="ProGPU.Wpf" HintPath="$(GalleryOutput)/ProGPU.Wpf.dll" Private="false" />
+  </ItemGroup>
+</Project>
