@@ -81,6 +81,7 @@ internal sealed class GalleryAcceptanceScenario
     private bool _nestedCommandInvoked;
     private bool _nestedCommandMouseDown;
     private bool _nestedCommandMouseUp;
+    private Point _contextMenuOwnerPointBeforeMove;
     private Point _nestedCommandOwnerPoint;
     private ScenarioState _state;
 
@@ -153,6 +154,9 @@ internal sealed class GalleryAcceptanceScenario
                     break;
                 case ScenarioState.WaitingForContextMenuOpen:
                     VerifyContextMenuOpen();
+                    break;
+                case ScenarioState.WaitingForContextMenuOwnerMove:
+                    VerifyContextMenuOwnerMove();
                     break;
                 case ScenarioState.WaitingForNestedMenuOpen:
                     VerifyNestedMenuOpen();
@@ -524,6 +528,37 @@ internal sealed class GalleryAcceptanceScenario
         GalleryAcceptanceLog.Write(
             $"ContextMenu opened at screen ({contextOrigin.X:0.##},{contextOrigin.Y:0.##}), owner ({ownerPoint.X:0.##},{ownerPoint.Y:0.##}).");
 
+        _contextMenuOwnerPointBeforeMove = ownerPoint;
+        _window.Left += 48;
+        _window.Top += 32;
+        _window.UpdateLayout();
+        ProGpuWpfDiagnostics.TryRequestRender(_window);
+        SetState(ScenarioState.WaitingForContextMenuOwnerMove);
+    }
+
+    private void VerifyContextMenuOwnerMove()
+    {
+        ArgumentNullException.ThrowIfNull(_contextMenu);
+        ArgumentNullException.ThrowIfNull(_nestedMenu);
+        ArgumentNullException.ThrowIfNull(_window);
+        Require(_contextMenu.IsOpen, "ContextMenu closed while its owner window moved.");
+
+        _contextMenu.UpdateLayout();
+        var contextOrigin = _contextMenu.PointToScreen(new Point(0, 0));
+        var ownerPoint = _window.PointFromScreen(contextOrigin);
+        if (Math.Abs(ownerPoint.X - _contextMenuOwnerPointBeforeMove.X) > 2 ||
+            Math.Abs(ownerPoint.Y - _contextMenuOwnerPointBeforeMove.Y) > 2)
+        {
+            Require(
+                _stateTicks < 12,
+                $"ContextMenu did not follow its moved owner; owner-relative origin changed from {_contextMenuOwnerPointBeforeMove} to {ownerPoint}.");
+            ProGpuWpfDiagnostics.TryRequestRender(_window);
+            return;
+        }
+
+        AssertPopupRenderState("owner-moved ContextMenu", minimumPopupCount: 1);
+        GalleryAcceptanceLog.Write(
+            $"ContextMenu followed its moved owner at screen ({contextOrigin.X:0.##},{contextOrigin.Y:0.##}), owner ({ownerPoint.X:0.##},{ownerPoint.Y:0.##}).");
         _nestedMenu.IsSubmenuOpen = true;
         ProGpuWpfDiagnostics.TryRequestRender(_window);
         SetState(ScenarioState.WaitingForNestedMenuOpen);
@@ -827,6 +862,7 @@ internal sealed class GalleryAcceptanceScenario
         WaitingForComboBoxClose,
         OpeningContextMenu,
         WaitingForContextMenuOpen,
+        WaitingForContextMenuOwnerMove,
         WaitingForNestedMenuOpen,
         PressingNestedCommand,
         ReleasingNestedCommand,
