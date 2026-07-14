@@ -17,5 +17,6 @@
     <Reference Include="PresentationCore" HintPath="$(GalleryOutput)/PresentationCore.dll" Private="false" />
     <Reference Include="PresentationFramework" HintPath="$(GalleryOutput)/PresentationFramework.dll" Private="false" />
     <Reference Include="ProGPU.Wpf" HintPath="$(GalleryOutput)/ProGPU.Wpf.dll" Private="false" />
+    <Reference Include="ProGPU.Wpf.Interop" HintPath="$(GalleryOutput)/ProGPU.Wpf.Interop.dll" Private="false" />
   </ItemGroup>
 </Project>

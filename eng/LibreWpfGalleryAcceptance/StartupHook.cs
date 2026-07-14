@@ -2,11 +2,13 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.ProGPU;
 using System.Windows.Media.ProGPU.Platform;
 using System.Windows.Threading;
+using ProGPU.Wpf.Interop;
 
 public static class StartupHook
 {
@@ -67,12 +69,15 @@ internal sealed class GalleryAcceptanceScenario
     private ContextMenu? _contextMenu;
     private MenuItem? _nestedMenu;
     private MenuItem? _nestedCommand;
+    private TextBox? _selectedTextBox;
     private int _targetIndex;
     private int _navigatedCount;
     private int _stateTicks;
     private bool _inputExercised;
     private bool _comboBoxExercised;
     private bool _contextMenuExercised;
+    private bool _textSelectionInputExercised;
+    private bool _textSelectionExercised;
     private bool _nestedCommandInvoked;
     private bool _nestedCommandMouseDown;
     private bool _nestedCommandMouseUp;
@@ -130,6 +135,9 @@ internal sealed class GalleryAcceptanceScenario
                     break;
                 case ScenarioState.WaitingForNavigation:
                     VerifyNavigation();
+                    break;
+                case ScenarioState.WaitingForTextSelectionRender:
+                    VerifyTextSelectionRender();
                     break;
                 case ScenarioState.OpeningComboBox:
                     OpenComboBox();
@@ -298,9 +306,11 @@ internal sealed class GalleryAcceptanceScenario
             $"Navigation {_navigatedCount}/{_targets.Count}: title='{page.Title ?? string.Empty}', content bounds={page.ActualWidth:0.##}x{page.ActualHeight:0.##}.");
         _targetIndex++;
 
-        SetState(_openComboBox == null
-            ? ScenarioState.Navigating
-            : ScenarioState.OpeningComboBox);
+        SetState(_selectedTextBox != null && !_textSelectionExercised
+            ? ScenarioState.WaitingForTextSelectionRender
+            : _openComboBox == null
+                ? ScenarioState.Navigating
+                : ScenarioState.OpeningComboBox);
     }
 
     private void ExerciseSafeControls(Page page)
@@ -318,10 +328,30 @@ internal sealed class GalleryAcceptanceScenario
             _inputExercised = true;
         }
 
-        if (FindDescendant<TextBox>(page, control => control.IsEnabled && !control.IsReadOnly) is { } textBox)
+        if (FindDescendant<TextBox>(page, control => control.IsEnabled && !control.IsReadOnly && control.IsVisible) is { } textBox)
         {
             textBox.Text = "LibreWPF Gallery acceptance";
             textBox.CaretIndex = textBox.Text.Length;
+
+            if (!_textSelectionInputExercised)
+            {
+                Require(textBox.Focus(), "Gallery TextBox did not accept keyboard focus.");
+                Require(RaiseInput(new WpfInputEventArgs(
+                        WpfInputEventKind.KeyDown,
+                        key: "A",
+                        modifiers: WpfInputModifiers.Control)),
+                    "Ctrl+A key-down was not accepted by the portable WPF input route.");
+                RaiseInput(new WpfInputEventArgs(
+                    WpfInputEventKind.KeyUp,
+                    key: "A",
+                    modifiers: WpfInputModifiers.Control));
+                Require(textBox.SelectionStart == 0 && textBox.SelectionLength == textBox.Text.Length,
+                    $"Ctrl+A did not select the complete TextBox value; start={textBox.SelectionStart}, length={textBox.SelectionLength}, text={textBox.Text.Length}.");
+                textBox.UpdateLayout();
+                ProGpuWpfDiagnostics.TryRequestRender(_window);
+                _selectedTextBox = textBox;
+                _textSelectionInputExercised = true;
+            }
         }
 
         if (FindDescendant<PasswordBox>(page, control => control.IsEnabled) is { } passwordBox)
@@ -370,6 +400,30 @@ internal sealed class GalleryAcceptanceScenario
             comboBox.SelectedIndex = Math.Max(0, comboBox.SelectedIndex);
             _openComboBox = comboBox;
         }
+    }
+
+    private void VerifyTextSelectionRender()
+    {
+        ArgumentNullException.ThrowIfNull(_selectedTextBox);
+        if (!FindSelectionRenderData(_selectedTextBox, out var selectionRenderData))
+        {
+            Require(_stateTicks < 12, "Selected TextBox did not publish typed caret/selection render data after a presented frame.");
+            ProGpuWpfDiagnostics.TryRequestRender(_window);
+            return;
+        }
+
+        GalleryAcceptanceLog.Write(
+            $"TextBox Ctrl+A selected {_selectedTextBox.SelectionLength} characters and published {selectionRenderData.RenderDataBytes} bytes of typed selection render data; " +
+            $"brush alpha={selectionRenderData.BrushAlpha}, geometry={selectionRenderData.GeometryBounds}, visual={selectionRenderData.VisualBounds}.");
+        Require(selectionRenderData.BrushAlpha > 0,
+            "Selected TextBox published a fully transparent selection brush.");
+        Require(!selectionRenderData.GeometryBounds.IsEmpty,
+            "Selected TextBox published empty selection geometry.");
+        _textSelectionExercised = true;
+        _selectedTextBox = null;
+        SetState(_openComboBox == null
+            ? ScenarioState.Navigating
+            : ScenarioState.OpeningComboBox);
     }
 
     private void OpenComboBox()
@@ -634,10 +688,11 @@ internal sealed class GalleryAcceptanceScenario
         Require(_inputExercised, "Typed ProGPU input was not exercised.");
         Require(_comboBoxExercised, "No ComboBox popup was exercised.");
         Require(_contextMenuExercised, "No ContextMenu was exercised.");
+        Require(_textSelectionExercised, "No TextBox keyboard shortcut and selection rendering was exercised.");
         Require(_nestedCommandInvoked, "Nested ContextMenu command was not invoked.");
         AssertRenderState("final frame");
         GalleryAcceptanceLog.Write(
-            $"PASS: {_navigatedCount} pages navigated; moved-window rendering, retained composition, GPU hit testing, typed input, ComboBox, ContextMenu, and nested submenu validated.");
+            $"PASS: {_navigatedCount} pages navigated; moved-window rendering, retained composition, GPU hit testing, typed input, TextBox selection, keyboard shortcuts, ComboBox, ContextMenu, and nested submenu validated.");
         StopAndShutdown(0);
     }
 
@@ -696,7 +751,68 @@ internal sealed class GalleryAcceptanceScenario
         return null;
     }
 
+    private static bool FindSelectionRenderData(DependencyObject root, out SelectionRenderData selectionRenderData)
+    {
+        selectionRenderData = default;
+        if (root is Adorner &&
+            root is IPortableDrawingContentSource drawingContentSource &&
+            drawingContentSource.TryGetPortableDrawingContent(out var content) &&
+            content is IPortableRenderDataSource renderDataSource &&
+            renderDataSource.TryGetPortableRenderDataSnapshot(out var snapshot) &&
+            snapshot.RenderData.Length > 0)
+        {
+            var brushAlpha = (byte)0;
+            var geometryBounds = Rect.Empty;
+            foreach (var resource in snapshot.DependentResources)
+            {
+                if (resource is SolidColorBrush solidColorBrush)
+                {
+                    brushAlpha = Math.Max(brushAlpha, solidColorBrush.Color.A);
+                }
+                else if (resource is Geometry geometry && !geometry.Bounds.IsEmpty)
+                {
+                    geometryBounds.Union(geometry.Bounds);
+                }
+            }
+
+            var visualBounds = Rect.Empty;
+            if (root is IPortableVisualBoundsSource visualBoundsSource &&
+                visualBoundsSource.TryGetPortableVisualBounds(out var portableVisualBounds))
+            {
+                visualBounds = new Rect(
+                    portableVisualBounds.ContentBounds.X,
+                    portableVisualBounds.ContentBounds.Y,
+                    portableVisualBounds.ContentBounds.Width,
+                    portableVisualBounds.ContentBounds.Height);
+            }
+
+            selectionRenderData = new SelectionRenderData(
+                snapshot.RenderData.Length,
+                brushAlpha,
+                geometryBounds,
+                visualBounds);
+            return true;
+        }
+
+        var childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (var index = 0; index < childCount; index++)
+        {
+            if (FindSelectionRenderData(VisualTreeHelper.GetChild(root, index), out selectionRenderData))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private readonly record struct NavigationTarget(TreeViewItem Container, TreeViewItem? Parent);
+
+    private readonly record struct SelectionRenderData(
+        int RenderDataBytes,
+        byte BrushAlpha,
+        Rect GeometryBounds,
+        Rect VisualBounds);
 
     private enum ScenarioState
     {
@@ -705,6 +821,7 @@ internal sealed class GalleryAcceptanceScenario
         DiscoveringNavigation,
         Navigating,
         WaitingForNavigation,
+        WaitingForTextSelectionRender,
         OpeningComboBox,
         WaitingForComboBoxOpen,
         WaitingForComboBoxClose,
