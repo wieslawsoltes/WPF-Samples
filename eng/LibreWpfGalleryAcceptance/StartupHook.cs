@@ -500,13 +500,48 @@ internal sealed class GalleryAcceptanceScenario
                     owners,
                     out var ownerCount) && ownerCount > 0,
             $"Nested command GPU hit test returned no owners at {_nestedCommandOwnerPoint}.");
+        var commandOwnerIndex = -1;
+        for (var index = 0; index < ownerCount; index++)
+        {
+            if (ReferenceEquals(owners[index], _nestedCommand) ||
+                owners[index] is Visual visual && visual.IsDescendantOf(_nestedCommand))
+            {
+                commandOwnerIndex = index;
+                break;
+            }
+        }
+        if (commandOwnerIndex < 0)
+        {
+            if (_stateTicks < 12)
+            {
+                ProGpuWpfDiagnostics.TryRequestRender(_window);
+                return;
+            }
+
+            var ownerSummary = string.Empty;
+            for (var index = 0; index < ownerCount; index++)
+            {
+                var owner = owners[index];
+                var description = owner switch
+                {
+                    MenuItem menuItem => $"MenuItem[{menuItem.Header}]",
+                    FrameworkElement element => element.GetType().Name,
+                    null => "<null>",
+                    _ => owner.GetType().Name
+                };
+                ownerSummary += index == 0 ? description : $", {description}";
+            }
+            GalleryAcceptanceLog.Write($"Nested command owner miss: {ownerSummary}");
+        }
+        Require(commandOwnerIndex >= 0,
+            $"Nested command was absent from {ownerCount} GPU hit-test owners at {_nestedCommandOwnerPoint}.");
         Require(RaiseInput(new WpfInputEventArgs(
                 WpfInputEventKind.MouseMove,
                 x: _nestedCommandOwnerPoint.X,
                 y: _nestedCommandOwnerPoint.Y)),
             "Nested command mouse move was not accepted.");
         GalleryAcceptanceLog.Write(
-            $"Nested command input at screen ({commandScreenPoint.X:0.##},{commandScreenPoint.Y:0.##}), owner ({_nestedCommandOwnerPoint.X:0.##},{_nestedCommandOwnerPoint.Y:0.##}), GPU owners={ownerCount}.");
+            $"Nested command input at screen ({commandScreenPoint.X:0.##},{commandScreenPoint.Y:0.##}), owner ({_nestedCommandOwnerPoint.X:0.##},{_nestedCommandOwnerPoint.Y:0.##}), GPU owners={ownerCount}, command index={commandOwnerIndex}.");
         SetState(ScenarioState.PressingNestedCommand);
     }
 
