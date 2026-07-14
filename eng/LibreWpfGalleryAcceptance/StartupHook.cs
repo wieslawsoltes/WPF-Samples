@@ -423,6 +423,42 @@ internal sealed class GalleryAcceptanceScenario
             "Selected TextBox published a fully transparent selection brush.");
         Require(!selectionRenderData.GeometryBounds.IsEmpty,
             "Selected TextBox published empty selection geometry.");
+
+        ArgumentNullException.ThrowIfNull(_window);
+        var dragStart = _selectedTextBox.TranslatePoint(
+            new Point(
+                Math.Max(8, Math.Min(_selectedTextBox.ActualWidth - 8, 24)),
+                Math.Max(4, _selectedTextBox.ActualHeight * 0.5)),
+            _window);
+        var dragEnd = new Point(
+            Math.Min(_window.ActualWidth - 8, dragStart.X + 48),
+            dragStart.Y);
+        Require(RaiseInput(new WpfInputEventArgs(
+                WpfInputEventKind.MouseMove,
+                x: dragStart.X,
+                y: dragStart.Y)),
+            "Selected TextBox drag-start mouse move was not accepted.");
+        Require(RaiseInput(new WpfInputEventArgs(
+                WpfInputEventKind.MouseDown,
+                x: dragStart.X,
+                y: dragStart.Y,
+                button: WpfMouseButton.Left)),
+            "Selected TextBox drag-start mouse down was not accepted.");
+        Require(RaiseInput(new WpfInputEventArgs(
+                WpfInputEventKind.MouseMove,
+                x: dragEnd.X,
+                y: dragEnd.Y)),
+            "Selected TextBox selection drag was not accepted.");
+        Require(RaiseInput(new WpfInputEventArgs(
+                WpfInputEventKind.MouseUp,
+                x: dragEnd.X,
+                y: dragEnd.Y,
+                button: WpfMouseButton.Left)),
+            "Selected TextBox selection-drag mouse up was not accepted.");
+        Require(_selectedTextBox.Text == "LibreWPF Gallery acceptance",
+            "Selected TextBox content changed while exercising portable selection drag.");
+        GalleryAcceptanceLog.Write(
+            $"TextBox selection drag crossed the source-drag threshold from {dragStart} to {dragEnd} without entering Windows OLE.");
         _textSelectionExercised = true;
         _selectedTextBox = null;
         SetState(_openComboBox == null
