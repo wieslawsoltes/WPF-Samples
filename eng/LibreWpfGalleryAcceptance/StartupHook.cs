@@ -482,6 +482,32 @@ internal sealed class GalleryAcceptanceScenario
     {
         ArgumentNullException.ThrowIfNull(_openComboBox);
         Require(_openComboBox.IsDropDownOpen, "ComboBox popup closed before its rendered acceptance turn.");
+        _openComboBox.UpdateLayout();
+        if (_openComboBox.ItemContainerGenerator.ContainerFromIndex(0) is ComboBoxItem firstItem)
+        {
+            firstItem.UpdateLayout();
+            var expectedOwnerPoint = _openComboBox.TranslatePoint(
+                new Point(0, _openComboBox.ActualHeight),
+                _window!);
+            var firstItemOwnerPoint = _window!.PointFromScreen(
+                firstItem.PointToScreen(new Point(0, 0)));
+            var windowVisualOffset = VisualTreeHelper.GetOffset(_window);
+            var popup = _openComboBox.Template.FindName("PART_Popup", _openComboBox) as Popup;
+            var popupTarget = popup?.PlacementTarget;
+            var popupParent = popup?.Parent as FrameworkElement;
+            var popupParentOrigin = popupParent?.TranslatePoint(new Point(0, 0), _window) ?? new Point(double.NaN, double.NaN);
+            var popupDelta = firstItemOwnerPoint - expectedOwnerPoint;
+            GalleryAcceptanceLog.Write(
+                $"ComboBox expected popup at owner {expectedOwnerPoint}; first item reports owner {firstItemOwnerPoint}; delta=({firstItemOwnerPoint.X - expectedOwnerPoint.X:0.##},{firstItemOwnerPoint.Y - expectedOwnerPoint.Y:0.##}); window visual offset={windowVisualOffset}; popup target={popupTarget?.GetType().Name ?? "<null>"}; popup parent={popupParent?.GetType().Name ?? "<null>"} origin={popupParentOrigin} size={popupParent?.ActualWidth:0.##}x{popupParent?.ActualHeight:0.##}.");
+            if (Math.Abs(popupDelta.X) > 12 || Math.Abs(popupDelta.Y) > 12)
+            {
+                Require(
+                    _stateTicks < 12,
+                    $"ComboBox popup remained displaced from its placement target by {popupDelta}.");
+                ProGpuWpfDiagnostics.TryRequestRender(_window);
+                return;
+            }
+        }
         AssertPopupRenderState("open ComboBox popup", minimumPopupCount: 1);
         _openComboBox.IsDropDownOpen = false;
         ProGpuWpfDiagnostics.TryRequestRender(_window);
